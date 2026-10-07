@@ -9,40 +9,45 @@ A **production-grade** Reverse ETL pipeline with modern **Workflow Orchestration
 
 ---
 
-## Architecture & Workflow Orchestration
+## 🏛️ Architecture & Workflow Orchestration
 
 ```
-                      AIRFLOW DAG / PREFECT FLOW
-┌────────────────────────────────────────────────────────────────────────┐
-│                                                                        │
-│  [Step 1: Extract & Validate Task]                                      │
-│     │  Reads customer_data.csv, verifies schema & types                │
-│     ▼                                                                  │
-│  [Step 2: Transform & RFM Segmentation Task]                           │
-│     │  Cleans outliers, calculates RFM scores (VIP, Loyal, Regular, At Risk)
-│     ▼                                                                  │
-│  [Step 3: Load Warehouse Task]                                         │
-│     │  Upserts dim_customers, appends fact_rfm_scores, logs etl_run_log│
-│     ▼                                                                  │
-│  [Step 4: Reverse ETL Push Task] (with Retries & Backoff)              │
-│     │  Queries analytical warehouse -> HTTP POST to CRM REST API       │
-│     ▼                                                                  │
-│  [Step 5: Notify & Audit Task]                                         │
-│        Aggregates run metrics & logs summary                           │
-│                                                                        │
-└──────────────────────────────────┬─────────────────────────────────────┘
-                                   │
-                                   ▼
-                ┌─────────────────────────────────────┐
-                │ Mock CRM System (Flask - Port 5050) │
-                │ ├─ REST Endpoints (POST /api/crm)   │
-                │ └─ Live UI: http://127.0.0.1:5050   │
-                └─────────────────────────────────────┘
+                            SCHEDULED DAG PIPELINE
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                             │
+│  [1. task_extract_and_validate]                                             │
+│      └─ Ingests customer_data.csv & enforces schema + type checks           │
+│         │                                                                   │
+│         ▼                                                                   │
+│  [2. task_transform_and_segment]                                            │
+│      └─ Computes RFM scores & segments (VIP, Loyal, Regular, At Risk)       │
+│         │                                                                   │
+│         ▼                                                                   │
+│  [3. task_load_warehouse]                                                   │
+│      └─ Upserts dim_customers, appends fact_rfm_scores, logs etl_run_log    │
+│         │                                                                   │
+│         ▼                                                                   │
+│  [4. task_reverse_etl_push]                                                 │
+│      └─ Reads analytical warehouse & pushes to CRM REST API (with retries)  │
+│         │                                                                   │
+│         ▼                                                                   │
+│  [5. task_generate_summary]                                                 │
+│      └─ Audits execution results, records counts, and push statistics       │
+│                                                                             │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+                                       ▼
+                    ┌─────────────────────────────────────┐
+                    │ Mock CRM System (Flask - Port 5050) │
+                    │ ├─ Live UI: http://127.0.0.1:5050   │
+                    │ ├─ Endpoints: /api/crm/customers    │
+                    │ └─ Persistence: SQLite (crm_store)  │
+                    └─────────────────────────────────────┘
 ```
 
 ---
 
-## Project Structure
+## 📦 Project Structure
 
 ```
 reverse-etl-crm-pipeline/
@@ -79,66 +84,94 @@ reverse-etl-crm-pipeline/
 
 ---
 
-## Workflow Orchestration Setup & Execution
+## 🧩 Orchestration Modules
 
-### 1. Prefect Orchestration (Native on all OS)
+| Component | File | Purpose |
+|-----------|------|---------|
+| **Prefect Flow & Tasks** | `orchestration/prefect_flow.py` | Prefect DAG with automatic retries (`retries=3`), exponential backoff, structured state logging, and `--serve` scheduled execution. |
+| **Apache Airflow DAG** | `dags/reverse_etl_airflow_dag.py` | Airflow DAG (`reverse_etl_customer_segmentation_dag`) configured with hourly schedule (`0 * * * *`), sequential `>>` task chaining, XCom metadata passing, and retry policies. |
+| **Prefect Test Suite** | `tests/test_prefect_flow.py` | Unit tests for each individual Prefect task plus end-to-end flow integration test. |
+| **Airflow Test Suite** | `tests/test_airflow_dag.py` | Unit tests verifying Airflow task callables, default arguments, and task execution logic. |
 
-Run the Prefect flow directly:
+---
+
+## 🧪 Test Suite & Validation (57 / 57 Tests Passed)
+
+```bash
+pytest tests/ -v
+```
+
+```
+collected 57 items
+
+tests/test_airflow_dag.py::TestAirflowDAGFunctions::test_default_args PASSED
+tests/test_airflow_dag.py::TestAirflowDAGFunctions::test_run_extract PASSED
+tests/test_airflow_dag.py::TestAirflowDAGFunctions::test_run_transform PASSED
+tests/test_airflow_dag.py::TestAirflowDAGFunctions::test_run_load_warehouse PASSED
+tests/test_airflow_dag.py::TestAirflowDAGFunctions::test_run_reverse_etl_push_mocked PASSED
+tests/test_airflow_dag.py::TestAirflowDAGFunctions::test_run_notify_and_audit PASSED
+tests/test_crm_client.py (7 tests) PASSED
+tests/test_extractor.py (5 tests) PASSED
+tests/test_prefect_flow.py (7 tests) PASSED
+tests/test_transformer.py (32 tests) PASSED
+
+============================= 57 passed in 30s =============================
+```
+
+---
+
+## ⚡ Live Orchestration Execution
+
 ```bash
 python orchestration/prefect_flow.py
 ```
 
-Serve the flow on a scheduled interval (e.g., every 10 minutes):
-```bash
-python orchestration/prefect_flow.py --serve
-```
-
-**Prefect Features Included:**
-- `@task` wrappers for each pipeline stage with retry policies (`retries=3, retry_delay_seconds=3`).
-- `@flow` dependency coordinator with structured execution logging.
-- Native tag-based filtering (`tags=['reverse-etl', 'warehouse']`).
-- Support for Prefect Cloud / self-hosted Prefect server deployments.
+**Task Lifecycle Output:**
+1. `Task 'Extract and Validate Customer Data'`: 30 records ingested → **Completed**
+2. `Task 'Transform and Segment Customers'`: 4 segments calculated (VIP, Loyal, Regular, At Risk) → **Completed**
+3. `Task 'Load into Analytics Warehouse'`: Star-schema SQLite tables updated → **Completed**
+4. `Task 'Reverse ETL - Push to CRM REST API'`: 30 records synced via HTTP POST → **Completed**
+5. `Task 'Generate Pipeline Run Summary'`: Final run audit logged → **Completed**
+6. **Flow Status:** **`Completed()`**
 
 ---
 
-### 2. Apache Airflow DAG
-
-The Airflow DAG is located at:
-📁 [`dags/reverse_etl_airflow_dag.py`](file:///C:/Users/Padmaja%20Kachare/.gemini/antigravity-ide/scratch/reverse-etl-crm-pipeline/dags/reverse_etl_airflow_dag.py)
-
-**DAG Specifications:**
-- **DAG ID:** `reverse_etl_customer_segmentation_dag`
-- **Schedule Interval:** `0 * * * *` (Hourly)
-- **Catchup:** `False`
-- **Task Dependencies:**
-  ```
-  extract_and_validate >> transform_and_segment >> load_warehouse >> reverse_etl_crm_push >> notify_and_audit
-  ```
-- **XCom Integration:** Passes execution run IDs and records counts between tasks.
-
----
-
-## Quick Start (End-to-End)
+## 🚀 How to Run
 
 ### 1. Start the Mock CRM Server
 ```bash
 python mock_crm_server/app.py
 ```
-View the dashboard at [http://127.0.0.1:5050/](http://127.0.0.1:5050/).
+Open [http://127.0.0.1:5050/](http://127.0.0.1:5050/) to view the live CRM dashboard.
 
-### 2. Run the Orchestrated Flow
+### 2. Run the Workflow Orchestration
+
+**Using Prefect (Immediate single run):**
 ```bash
 python orchestration/prefect_flow.py
 ```
 
-### 3. Run All Test Suites
+**Using Prefect (Scheduled background service, every 10 min):**
+```bash
+python orchestration/prefect_flow.py --serve
+```
+
+**Using Airflow:**
+Place `dags/reverse_etl_airflow_dag.py` into your Airflow `$AIRFLOW_HOME/dags` folder. The DAG will be scheduled to run hourly (`0 * * * *`).
+
+### 3. Run Standalone CLI Orchestrator
+```bash
+python pipeline.py
+```
+
+### 4. Run Pytest Suite
 ```bash
 pytest tests/ -v
 ```
 
 ---
 
-## Customer Segments (RFM-based)
+## 🎯 Customer Segments (RFM-based)
 
 | Segment   | RFM Score | Marketing Action         |
 |-----------|-----------|--------------------------|
@@ -149,7 +182,7 @@ pytest tests/ -v
 
 ---
 
-## Key Improvements Over Basic Approach
+## 📊 Key Improvements Over Basic Approach
 
 | Feature | Old Repo | This Repo |
 |---------|----------|-----------|
@@ -157,5 +190,5 @@ pytest tests/ -v
 | **Scheduled DAGs** | None | Automated hourly / interval triggers |
 | **Reverse ETL target** | CSV file | REST API (HTTP POST) with backoff |
 | **Warehouse schema** | Flat table | Star schema (`dim_customers` + `fact_rfm_scores`) |
-| **ETL run tracking** | None | `etl_run_log` table |
-| **Testing** | 0 tests | 50+ pytest unit & integration tests |
+| **ETL run tracking** | None | `etl_run_log` audit table |
+| **Testing** | 0 tests | 57 pytest unit & integration tests (100% passing) |
