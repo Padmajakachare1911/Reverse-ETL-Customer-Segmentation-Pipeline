@@ -1,0 +1,60 @@
+# ============================================================
+# Reverse ETL Pipeline Configuration
+# ============================================================
+
+pipeline:
+  name: "Reverse ETL Customer Segmentation Pipeline"
+  version: "1.0.0"
+  run_interval_seconds: 60      # used by scheduler
+
+paths:
+  input_csv: "data/customer_data.csv"
+  database: "data/customer_warehouse.db"
+  log_file: "logs/pipeline.log"
+
+warehouse:
+  tables:
+    dim_customers: "dim_customers"
+    fact_rfm: "fact_rfm_scores"
+    etl_runs: "etl_run_log"
+
+rfm:
+  recency:
+    high_threshold: 7           # <= 7 days → score 3
+    medium_threshold: 30        # <= 30 days → score 2
+    # else score 1
+  frequency:
+    high_threshold: 15          # >= 15 → score 3
+    medium_threshold: 8         # >= 8 → score 2
+    # else score 1
+  monetary:
+    high_threshold: 100000      # >= 100000 → score 3
+    medium_threshold: 50000     # >= 50000 → score 2
+    # else score 1
+
+segmentation:
+  thresholds:
+    vip: 8                      # rfm_score >= 8
+    loyal: 6                    # rfm_score >= 6
+    regular: 4                  # rfm_score >= 4
+    # else At Risk
+
+crm:
+  base_url: "http://127.0.0.1:5050"
+  endpoints:
+    push_customer: "/api/crm/customers"
+    bulk_push: "/api/crm/customers/bulk"
+    health: "/api/health"
+  timeout_seconds: 10
+  retry_attempts: 3
+  retry_delay_seconds: 2
+
+marketing_actions:
+  VIP: "Send premium offer"
+  Loyal: "Send loyalty reward"
+  Regular: "Send personalized promotion"
+  At Risk: "Send win-back campaign"
+
+logging:
+  level: "INFO"                 # DEBUG | INFO | WARNING | ERROR
+  format: "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
