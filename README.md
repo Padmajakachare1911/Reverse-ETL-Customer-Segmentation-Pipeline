@@ -1,161 +1,182 @@
-# Reverse ETL Customer Segmentation Pipeline
+# Reverse ETL Customer Segmentation: Comparative Data Engineering Practicals
 
-A **production-grade** Reverse ETL pipeline with modern **Workflow Orchestration (Prefect & Apache Airflow)**:
-1. Extracts raw customer data from a CSV source
-2. Cleans, scores (RFM), and segments customers
-3. Loads the enriched data into a **star-schema SQLite data warehouse**
-4. **Pushes segmented data to a CRM system via REST API** — the true Reverse ETL step
-5. **Scheduled DAG Orchestration** with retries, failure alerting, and dependency chaining using **Prefect** & **Apache Airflow**
+This repository showcases **two distinct, production-grade Data Engineering approaches to Customer Segmentation and Reverse ETL (Extract, Transform, Load)**. 
+
+While traditional ETL moves data from operational systems into an analytical warehouse, **Reverse ETL** extracts enriched analytical intelligence (such as customer clusters, lifetime value, or churn predictions) from the data warehouse and **syncs it back into operational systems** (such as CRMs, sales tools, and automated marketing workflows).
 
 ---
 
-## Architecture & Workflow Orchestration
+## 🧭 Repository Structure & Overview
 
 ```
-                      AIRFLOW DAG / PREFECT FLOW
-┌────────────────────────────────────────────────────────────────────────┐
-│                                                                        │
-│  [Step 1: Extract & Validate Task]                                      │
-│     │  Reads customer_data.csv, verifies schema & types                │
-│     ▼                                                                  │
-│  [Step 2: Transform & RFM Segmentation Task]                           │
-│     │  Cleans outliers, calculates RFM scores (VIP, Loyal, Regular, At Risk)
-│     ▼                                                                  │
-│  [Step 3: Load Warehouse Task]                                         │
-│     │  Upserts dim_customers, appends fact_rfm_scores, logs etl_run_log│
-│     ▼                                                                  │
-│  [Step 4: Reverse ETL Push Task] (with Retries & Backoff)              │
-│     │  Queries analytical warehouse -> HTTP POST to CRM REST API       │
-│     ▼                                                                  │
-│  [Step 5: Notify & Audit Task]                                         │
-│        Aggregates run metrics & logs summary                           │
-│                                                                        │
-└──────────────────────────────────┬─────────────────────────────────────┘
-                                   │
-                                   ▼
-                ┌─────────────────────────────────────┐
-                │ Mock CRM System (Flask - Port 5050) │
-                │ ├─ REST Endpoints (POST /api/crm)   │
-                │ └─ Live UI: http://127.0.0.1:5050   │
-                └─────────────────────────────────────┘
+Reverse-ETL-Customer-Segmentation-Pipeline/
+├── 01-rfm-orchestrated-crm-pipeline/        # Practical 1: Rule-Based RFM + Star Schema + REST API + DAG Orchestration
+│   ├── config/                             # Configuration files (YAML)
+│   ├── dags/                               # Apache Airflow DAG definitions
+│   ├── data/                               # Input purchase metrics & SQLite warehouse
+│   ├── mock_crm_server/                    # Flask Mock CRM REST API & Live Web UI
+│   ├── orchestration/                      # Prefect Flow definitions and task runners
+│   ├── src/                                # Core ETL & Reverse ETL pipeline modules
+│   ├── tests/                              # Pytest test suite (57 unit & integration tests)
+│   ├── pipeline.py                         # Standalone CLI pipeline runner
+│   ├── requirements.txt                    # Practical 1 dependencies
+│   └── README.md                           # Comprehensive Practical 1 documentation
+│
+├── 02-kmeans-duckdb-clustering-pipeline/    # Practical 2: Machine Learning K-Means + DuckDB + File Sync
+│   ├── customers.csv                       # Demographic & behavioral customer dataset
+│   ├── customer_analytics.duckdb           # DuckDB embedded analytical database
+│   ├── crm_customers.csv                   # Enriched customer records exported for CRM
+│   ├── customer_segments.csv               # Segment mapping table
+│   ├── segment_profiles.csv                # Cluster summary statistics & personas
+│   ├── customer_segments.png               # 2D PCA cluster visualization plot
+│   ├── main.py                             # Complete ML & DuckDB Reverse ETL pipeline
+│   ├── requirements.txt                    # Practical 2 dependencies
+│   └── README.md                           # Comprehensive Practical 2 documentation
+│
+├── .gitignore                              # Git exclusion rules
+└── README.md                               # This master documentation
 ```
 
 ---
 
-## Project Structure
+## ⚖️ Comparative Analysis: The Two Methods
 
+| Feature / Dimension | Practical 1 (`01-rfm-orchestrated-crm-pipeline`) | Practical 2 (`02-kmeans-duckdb-clustering-pipeline`) |
+| :--- | :--- | :--- |
+| **Method Name** | **Rule-Based RFM Scoring & API Push** | **Unsupervised ML (K-Means) & DuckDB Sync** |
+| **Segmentation Approach** | **Deterministic Business Rules**: Recency, Frequency, Monetary (RFM) thresholds | **Machine Learning**: Unsupervised K-Means clustering ($k=5$) + PCA reduction |
+| **Analytical Warehouse** | **Star-Schema SQLite** (`dim_customers`, `fact_rfm_scores`, `etl_run_log`) | **DuckDB Embedded OLAP** (`customer_analytics.duckdb` columnar engine) |
+| **Reverse ETL Mechanism** | **Live HTTP REST API**: JSON POST requests with exponential backoff & retries | **Operational File/Storage Sync**: CRM-ready CSV export + DuckDB table sync |
+| **Downstream Destination** | **Flask Mock CRM Service** with live UI dashboard (`http://127.0.0.1:5050`) | **Operational Marketing CRM Dataset** (`crm_customers.csv`) + PCA visual chart |
+| **Workflow Orchestration** | **Prefect 3.x Flow** + **Apache Airflow DAG** (`reverse_etl_airflow_dag.py`) | **Standalone Script Pipeline** (`main.py`) with Scikit-Learn transformers |
+| **Actionable Output** | Prescribed campaign actions (e.g., "Send premium offer", "Win-back") | Persona profiles (e.g., "Younger Customers", "Older Customers") + PCA scatter plot |
+| **Testing Suite** | 57 automated tests covering extraction, transformation, DB, and API mocks | Built-in data quality validation and console metrics reporting |
+| **Best Industry Use Case** | Transaction-heavy eCommerce platforms feeding real-time CRM webhooks | Exploratory customer analytics, churn/propensity cohorts, local OLAP exploration |
+
+---
+
+## 🏛️ High-Level Architectures
+
+### Method 1: RFM Scoring, Star Schema, & REST API Push
 ```
-reverse-etl-crm-pipeline/
-├── config/
-│   └── config.yaml                     # All configs: thresholds, paths, CRM URL
-├── dags/
-│   └── reverse_etl_airflow_dag.py      # Apache Airflow DAG definition
-├── data/
-│   └── customer_data.csv               # 30 customer records
-├── logs/                               # Pipeline run logs
-├── mock_crm_server/
-│   └── app.py                          # Flask CRM API server & web dashboard
-├── orchestration/
-│   ├── __init__.py
-│   └── prefect_flow.py                 # Prefect 2.x/3.x DAG Flow and Tasks
-├── src/
-│   ├── config_loader.py                # YAML config reader
-│   ├── crm_client.py                   # HTTP CRM client (retry + bulk)
-│   ├── extractor.py                    # CSV extraction + validation
-│   ├── loader.py                       # SQLite warehouse (star schema)
-│   ├── logger.py                       # Centralized logging
-│   ├── reverse_etl.py                  # True Reverse ETL step
-│   └── transformer.py                  # RFM scoring + segmentation
-├── tests/
-│   ├── test_airflow_dag.py             # Airflow DAG logic unit tests
-│   ├── test_crm_client.py              # CRM client tests (mocked)
-│   ├── test_extractor.py               # Extractor tests
-│   ├── test_prefect_flow.py            # Prefect tasks & flow integration tests
-│   └── test_transformer.py             # RFM + segmentation tests
-├── pipeline.py                         # Standalone orchestrator CLI
-├── requirements.txt
-└── README.md
+  [Raw Purchase CSV]
+          │
+          ▼
+  [Data Extraction & Validation]
+          │
+          ▼
+  [RFM Scoring Engine] ───────────► Assigns VIP, Loyal, Regular, At Risk
+          │
+          ▼
+  [Star-Schema SQLite Warehouse] ──► Tables: dim_customers, fact_rfm_scores, etl_run_log
+          │
+          ▼ (Reverse ETL Step)
+  [HTTP REST API Client] ─────────► POST /api/crm/customers (with Exponential Backoff)
+          │
+          ▼
+  [Flask Mock CRM Service] ───────► Real-Time Web Dashboard (Port 5050)
+```
+
+### Method 2: Machine Learning K-Means Clustering & DuckDB Sync
+```
+  [Raw Customer Demographics CSV]
+          │
+          ▼
+  [Standardize & Clean] ──────────► DuckDB Table: raw_customers
+          │
+          ▼
+  [ColumnTransformer Preprocessing] (One-Hot Encoding, Median Imputation, Standard Scaling)
+          │
+          ▼
+  [K-Means Clustering + PCA] ─────► 5 Natural Customer Personas
+          │
+          ▼
+  [DuckDB Analytical Warehouse] ──► Tables: customer_segments, segment_profiles
+          │
+          ▼ (Reverse ETL Step)
+  [Operational CRM Exporter] ─────► crm_customers.csv, segment_profiles.csv, customer_segments.png
 ```
 
 ---
 
-## Workflow Orchestration Setup & Execution
+## 🚀 Quick Start Guide
 
-### 1. Prefect Orchestration (Native on all OS)
+### 1. Global Setup
 
-Run the Prefect flow directly:
+Create and activate a virtual environment:
 ```bash
-python orchestration/prefect_flow.py
-```
+python -m venv .venv
 
-Serve the flow on a scheduled interval (e.g., every 10 minutes):
-```bash
-python orchestration/prefect_flow.py --serve
-```
+# On Windows:
+.venv\Scripts\activate
 
-**Prefect Features Included:**
-- `@task` wrappers for each pipeline stage with retry policies (`retries=3, retry_delay_seconds=3`).
-- `@flow` dependency coordinator with structured execution logging.
-- Native tag-based filtering (`tags=['reverse-etl', 'warehouse']`).
-- Support for Prefect Cloud / self-hosted Prefect server deployments.
-
----
-
-### 2. Apache Airflow DAG
-
-The Airflow DAG is located at:
-📁 [`dags/reverse_etl_airflow_dag.py`](file:///C:/Users/Padmaja%20Kachare/.gemini/antigravity-ide/scratch/reverse-etl-crm-pipeline/dags/reverse_etl_airflow_dag.py)
-
-**DAG Specifications:**
-- **DAG ID:** `reverse_etl_customer_segmentation_dag`
-- **Schedule Interval:** `0 * * * *` (Hourly)
-- **Catchup:** `False`
-- **Task Dependencies:**
-  ```
-  extract_and_validate >> transform_and_segment >> load_warehouse >> reverse_etl_crm_push >> notify_and_audit
-  ```
-- **XCom Integration:** Passes execution run IDs and records counts between tasks.
-
----
-
-## Quick Start (End-to-End)
-
-### 1. Start the Mock CRM Server
-```bash
-python mock_crm_server/app.py
-```
-View the dashboard at [http://127.0.0.1:5050/](http://127.0.0.1:5050/).
-
-### 2. Run the Orchestrated Flow
-```bash
-python orchestration/prefect_flow.py
-```
-
-### 3. Run All Test Suites
-```bash
-pytest tests/ -v
+# On macOS/Linux:
+source .venv/bin/activate
 ```
 
 ---
 
-## Customer Segments (RFM-based)
+### 2. Running Practical 1 (`01-rfm-orchestrated-crm-pipeline`)
 
-| Segment   | RFM Score | Marketing Action         |
-|-----------|-----------|--------------------------|
-| VIP       | ≥ 8       | Send premium offer       |
-| Loyal     | ≥ 6       | Send loyalty reward      |
-| Regular   | ≥ 4       | Send personalized promo  |
-| At Risk   | < 4       | Send win-back campaign   |
+1. Change directory to Practical 1:
+   ```bash
+   cd 01-rfm-orchestrated-crm-pipeline
+   pip install -r requirements.txt
+   ```
+
+2. Start the Mock CRM Server in one terminal:
+   ```bash
+   python mock_crm_server/app.py
+   ```
+   *(View the web UI at [http://127.0.0.1:5050](http://127.0.0.1:5050))*
+
+3. In a second terminal, execute the Reverse ETL pipeline:
+   ```bash
+   # Option A: Run standalone pipeline CLI
+   python pipeline.py
+
+   # Option B: Run with Prefect Flow orchestration
+   python orchestration/prefect_flow.py
+
+   # Option C: Run all unit and integration tests
+   pytest tests/ -v
+   ```
+
+*For complete details, see [01-rfm-orchestrated-crm-pipeline/README.md](file:///01-rfm-orchestrated-crm-pipeline/README.md).*
 
 ---
 
-## Key Improvements Over Basic Approach
+### 3. Running Practical 2 (`02-kmeans-duckdb-clustering-pipeline`)
 
-| Feature | Old Repo | This Repo |
-|---------|----------|-----------|
-| **Workflow Orchestration** | None | **Prefect Flow + Apache Airflow DAG** |
-| **Scheduled DAGs** | None | Automated hourly / interval triggers |
-| **Reverse ETL target** | CSV file | REST API (HTTP POST) with backoff |
-| **Warehouse schema** | Flat table | Star schema (`dim_customers` + `fact_rfm_scores`) |
-| **ETL run tracking** | None | `etl_run_log` table |
-| **Testing** | 0 tests | 50+ pytest unit & integration tests |
+1. Change directory to Practical 2:
+   ```bash
+   cd 02-kmeans-duckdb-clustering-pipeline
+   pip install -r requirements.txt
+   ```
+
+2. Run the end-to-end pipeline:
+   ```bash
+   python main.py
+   ```
+
+3. Outputs generated:
+   - `customer_analytics.duckdb`: Columnar database with raw and segmented tables.
+   - `crm_customers.csv`: Customer records enriched with predicted personas.
+   - `segment_profiles.csv`: Mean metrics per cluster.
+   - `customer_segments.png`: High-resolution 2D PCA cluster visualization.
+
+*For complete details, see [02-kmeans-duckdb-clustering-pipeline/README.md](file:///02-kmeans-duckdb-clustering-pipeline/README.md).*
+
+---
+
+## 📌 Summary: When to Use Which Method?
+
+- **Use Method 1 (RFM + REST API)** when:
+  - Your business rules are deterministic and tied directly to recency, transaction frequency, and total revenue.
+  - You require enterprise workflow DAG coordination (Prefect / Airflow) with automated retries and alerting.
+  - Your downstream destination is a live third-party cloud service accessible via REST APIs (e.g., Salesforce, HubSpot, Klaviyo).
+
+- **Use Method 2 (K-Means + DuckDB)** when:
+  - You have multi-dimensional demographic, behavioral, or lifestyle data without pre-defined segment boundaries.
+  - You need fast, in-process analytical data warehousing (DuckDB) without external database server overhead.
+  - Your downstream destination consumes flat analytical extracts, batch sFTP drops, or operational data lakes.
